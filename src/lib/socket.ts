@@ -19,4 +19,7 @@ export function joinGameRoom(gameId: string): void {
     s.emit("join-room", gameId);
 }
 
+// Alias for backwards compatibility
+export const joinRoom = joinGameRoom;
+
 export { socket };
