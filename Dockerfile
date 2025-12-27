@@ -49,6 +49,6 @@ RUN chown -R nextjs:nodejs /app
 USER nextjs
 
 # Railway provides PORT env variable
-EXPOSE 3000
+EXPOSE 8080
 
 CMD ["npx", "tsx", "server.ts"]
