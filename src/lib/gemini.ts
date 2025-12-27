@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 const apiKey = process.env.GOOGLE_GENERIC_AI_KEY || "";
 const genAI = new GoogleGenerativeAI(apiKey);
 
+
 export type Question = {
   text: string;
   answer: string;
