@@ -10,4 +10,5 @@ restartPolicyMaxRetries = 3
 
 # Required environment variables (set in Railway dashboard):
 # GOOGLE_GENERIC_AI_KEY - Your Google Gemini API key
+# RAILWAY_PUBLIC_DOMAIN - Set automatically by Railway
 # PORT - Set automatically by Railway

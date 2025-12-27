@@ -3,5 +3,6 @@ import { NextResponse } from 'next/server';
 import ip from 'ip';
 
 export async function GET() {
-    return NextResponse.json({ ip: ip.address() });
+    const host = process.env.PUBLIC_HOST || process.env.RAILWAY_PUBLIC_DOMAIN || ip.address();
+    return NextResponse.json({ ip: host });
 }
