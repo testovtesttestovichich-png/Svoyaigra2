@@ -7,7 +7,7 @@ import ip from "ip";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
-const port = 3000;
+const port = parseInt(process.env.PORT || "3000", 10);
 
 // When using Next.js in a custom server with app directory, we don't need a custom server for routing, just for socket.io
 const app = next({ dev, hostname, port, dir: process.cwd() });

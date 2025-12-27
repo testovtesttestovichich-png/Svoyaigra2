@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 100
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+# Required environment variables (set in Railway dashboard):
+# GOOGLE_GENERIC_AI_KEY - Your Google Gemini API key
+# PORT - Set automatically by Railway

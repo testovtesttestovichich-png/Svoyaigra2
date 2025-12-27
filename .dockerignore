@@ -1,0 +1,30 @@
+# Dependencies
+node_modules
+npm-debug.log
+
+# Next.js
+.next
+out
+
+# Build files
+*.log
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Misc
+README.md
+*.md
+.env*.local
