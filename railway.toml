@@ -10,5 +10,6 @@ restartPolicyMaxRetries = 3
 
 # Required environment variables (set in Railway dashboard):
 # GOOGLE_GENERIC_AI_KEY - Your Google Gemini API key
-# RAILWAY_PUBLIC_DOMAIN - Set automatically by Railway
+# NEXT_PUBLIC_HOST - Your Railway domain for QR codes (e.g. your-app.railway.app)
+#                    Must be set as build-time variable in Railway
 # PORT - Set automatically by Railway

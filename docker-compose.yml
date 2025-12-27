@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_HOST=${NEXT_PUBLIC_HOST:-}
     hostname: svoyaigra
     ports:
       - "8080:8080"
@@ -10,7 +12,6 @@ services:
       - NODE_ENV=production
       - PORT=8080
       - HOST=0.0.0.0
-      - PUBLIC_HOST=${PUBLIC_HOST:-}
       - GOOGLE_GENERIC_AI_KEY=${GOOGLE_GENERIC_AI_KEY}
     restart: unless-stopped
 
@@ -28,6 +29,7 @@ services:
     environment:
       - NODE_ENV=development
       - PORT=8080
+      - NEXT_PUBLIC_HOST=${NEXT_PUBLIC_HOST:-}
       - GOOGLE_GENERIC_AI_KEY=${GOOGLE_GENERIC_AI_KEY}
     command: npm run dev
     profiles:

@@ -9,8 +9,11 @@ import useSound from "use-sound";
 
 export default function DisplayPage() {
     const [gameState, setGameState] = useState<any>(null);
-    const [ipAddress, setIpAddress] = useState("");
+    const [localIp, setLocalIp] = useState("");
     const [isAudioEnabled, setIsAudioEnabled] = useState(false);
+
+    // Use env variable if set, otherwise fetch local IP
+    const publicHost = process.env.NEXT_PUBLIC_HOST || localIp;
 
     // Sounds
     const [playBuzzer] = useSound("/sounds/buzzer.mp3");
@@ -40,11 +43,13 @@ export default function DisplayPage() {
             if (sound === 'applaus') playApplaus();
         });
 
-        // Fetch IP for QR
-        fetch('/api/ip')
-            .then(res => res.json())
-            .then(data => setIpAddress(data.ip || ""))
-            .catch(console.error);
+        // Fetch local IP only if PUBLIC_HOST not set
+        if (!process.env.NEXT_PUBLIC_HOST) {
+            fetch('/api/ip')
+                .then(res => res.json())
+                .then(data => setLocalIp(data.ip || ""))
+                .catch(console.error);
+        }
 
         return () => {
             socket.off("game-state", setGameState);
@@ -69,11 +74,21 @@ export default function DisplayPage() {
     const activeQ = display?.activeQuestion;
     const buzzerPlayer = currentBuzzer ? players[currentBuzzer] : null;
 
-    const origin = typeof window !== 'undefined' ? window.location.origin : '';
-    const port = typeof window !== 'undefined' ? window.location.port : '3000';
-    const playerUrl = ipAddress && ipAddress !== 'localhost' && ipAddress !== '127.0.0.1'
-        ? `http://${ipAddress}:${port}/play`
-        : `${origin}/play`;
+    // Determine player URL for QR code
+    const getPlayerUrl = () => {
+        if (!publicHost) {
+            return typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play';
+        }
+        // Check if it's a domain (contains dot but not just IP)
+        const isDomain = publicHost.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(publicHost);
+        if (isDomain) {
+            return `https://${publicHost}/play`;
+        }
+        // It's an IP address - use current port
+        const port = typeof window !== 'undefined' ? window.location.port : '8080';
+        return `http://${publicHost}:${port}/play`;
+    };
+    const playerUrl = getPlayerUrl();
 
     return (
         <div className="min-h-screen bg-blue-900 text-white flex flex-col items-center justify-center font-sans overflow-hidden relative">

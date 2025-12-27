@@ -16,6 +16,10 @@ RUN npm ci
 FROM base AS builder
 WORKDIR /app
 
+# Pass NEXT_PUBLIC_HOST at build time for QR codes
+ARG NEXT_PUBLIC_HOST
+ENV NEXT_PUBLIC_HOST=$NEXT_PUBLIC_HOST
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
