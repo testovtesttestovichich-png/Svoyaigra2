@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -7,13 +6,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { QRCodeSVG } from "qrcode.react";
 import useSound from "use-sound";
 
+type HostInfo = {
+    host: string;
+    isPublicDomain: boolean;
+};
+
 export default function DisplayPage() {
     const [gameState, setGameState] = useState<any>(null);
-    const [localIp, setLocalIp] = useState("");
+    const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
     const [isAudioEnabled, setIsAudioEnabled] = useState(false);
-
-    // Use env variable if set, otherwise fetch local IP
-    const publicHost = process.env.NEXT_PUBLIC_HOST || localIp;
 
     // Sounds
     const [playBuzzer] = useSound("/sounds/buzzer.mp3");
@@ -43,13 +44,11 @@ export default function DisplayPage() {
             if (sound === 'applaus') playApplaus();
         });
 
-        // Fetch local IP only if PUBLIC_HOST not set
-        if (!process.env.NEXT_PUBLIC_HOST) {
-            fetch('/api/ip')
-                .then(res => res.json())
-                .then(data => setLocalIp(data.ip || ""))
-                .catch(console.error);
-        }
+        // Fetch host info from API
+        fetch('/api/ip')
+            .then(res => res.json())
+            .then(data => setHostInfo(data))
+            .catch(console.error);
 
         return () => {
             socket.off("game-state", setGameState);
@@ -76,17 +75,17 @@ export default function DisplayPage() {
 
     // Determine player URL for QR code
     const getPlayerUrl = () => {
-        if (!publicHost) {
+        if (!hostInfo?.host) {
             return typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play';
         }
-        // Check if it's a domain (contains dot but not just IP)
-        const isDomain = publicHost.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(publicHost);
-        if (isDomain) {
-            return `https://${publicHost}/play`;
+        
+        if (hostInfo.isPublicDomain) {
+            return `https://${hostInfo.host}/play`;
         }
+        
         // It's an IP address - use current port if present
         const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '';
-        return `http://${publicHost}${port}/play`;
+        return `http://${hostInfo.host}${port}/play`;
     };
     const playerUrl = getPlayerUrl();
 
@@ -200,7 +199,7 @@ export default function DisplayPage() {
                     {['question', 'answer', 'final_bets', 'final_question', 'final_processing', 'final_reveal'].includes(display.screen) && activeQ && (
                         <motion.div
                             key="question-answer-final"
-                            layoutId="active-question-card" // Reserved for future shared layout animation if we mapped IDs
+                            layoutId="active-question-card"
                             initial={{ scale: 0.1, opacity: 0, rotateX: 90 }}
                             animate={{ scale: 1, opacity: 1, rotateX: 0 }}
                             exit={{ scale: 1.5, opacity: 0 }}

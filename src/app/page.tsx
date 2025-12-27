@@ -4,44 +4,39 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 
-export default function Home() {
-  const [localIp, setLocalIp] = useState<string>("");
-  const [mounted, setMounted] = useState(false);
+type HostInfo = {
+  host: string;
+  isPublicDomain: boolean;
+};
 
-  // Use env variable if set, otherwise fetch local IP
-  const publicHost = process.env.NEXT_PUBLIC_HOST || localIp;
+export default function Home() {
+  const [hostInfo, setHostInfo] = useState<HostInfo | null>(null);
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
 
-    // Fetch local IP only if PUBLIC_HOST not set
-    if (!process.env.NEXT_PUBLIC_HOST) {
-      fetch('/api/ip')
-        .then(res => res.json())
-        .then(data => {
-          if (data.ip) {
-            setLocalIp(data.ip);
-          }
-        })
-        .catch(err => console.error("Failed to fetch IP:", err));
-    }
+    fetch('/api/ip')
+      .then(res => res.json())
+      .then(data => setHostInfo(data))
+      .catch(err => console.error("Failed to fetch host:", err));
   }, []);
 
   if (!mounted) return null;
 
   // Determine player URL for QR code
   const getPlayerUrl = () => {
-    if (!publicHost) {
+    if (!hostInfo?.host) {
       return typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play';
     }
-    // Check if it's a domain (contains dot but not just IP)
-    const isDomain = publicHost.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(publicHost);
-    if (isDomain) {
-      return `https://${publicHost}/play`;
+    
+    if (hostInfo.isPublicDomain) {
+      return `https://${hostInfo.host}/play`;
     }
-    // It's an IP address - use current port
+    
+    // It's an IP address - use current port if present
     const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '';
-    return `http://${publicHost}${port}/play`;
+    return `http://${hostInfo.host}${port}/play`;
   };
   const playerUrl = getPlayerUrl();
 

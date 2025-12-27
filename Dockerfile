@@ -6,7 +6,6 @@ WORKDIR /app
 
 # ===== Dependencies stage =====
 FROM base AS deps
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine
 RUN apk add --no-cache libc6-compat
 
 COPY package.json package-lock.json ./
@@ -15,10 +14,6 @@ RUN npm ci
 # ===== Builder stage =====
 FROM base AS builder
 WORKDIR /app
-
-# Pass NEXT_PUBLIC_HOST at build time for QR codes
-ARG NEXT_PUBLIC_HOST
-ENV NEXT_PUBLIC_HOST=$NEXT_PUBLIC_HOST
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -52,7 +47,6 @@ RUN chown -R nextjs:nodejs /app
 
 USER nextjs
 
-# Railway provides PORT env variable
 EXPOSE 8080
 
 CMD ["npx", "tsx", "server.ts"]
