@@ -1,22 +1,20 @@
-
 import { createServer } from "node:http";
 import next from "next";
 import { Server } from "socket.io";
-import { v4 as uuidv4 } from "uuid";
 import ip from "ip";
 
 const dev = process.env.NODE_ENV !== "production";
 const hostname = "0.0.0.0";
 const port = parseInt(process.env.PORT || "8080", 10);
 
-// When using Next.js in a custom server with app directory, we don't need a custom server for routing, just for socket.io
 const app = next({ dev, hostname, port, dir: process.cwd() });
 const handler = app.getRequestHandler();
 
-// Game State Types
+// ============ Types ============
+
 type Player = {
-    id: string; // This is the persistent UUID
-    socketId: string; // The current socket ID
+    id: string;
+    socketId: string;
     name: string;
     score: number;
     bet?: number;
@@ -29,64 +27,126 @@ type DisplayState = {
         text: string;
         value: number;
         category: string;
-        answer?: string; // Only sent in answer mode preferably, but for simplicity here ok
+        answer?: string;
     } | null;
 };
 
 type GameState = {
-    players: Record<string, Player>; // Key is playerId (UUID), NOT socket.id
-    currentBuzzer: string | null; // This will store playerId (UUID)
+    id: string;
+    createdAt: Date;
+    players: Record<string, Player>;
+    currentBuzzer: string | null;
     isBuzzerLocked: boolean;
-    gameData: any | null; // Stores the full game content
-    playedQuestions: string[]; // Format: "roundIndex-catIndex-qIndex"
-    currentRound: number; // 0-indexed
+    gameData: any | null;
+    playedQuestions: string[];
+    currentRound: number;
     display: DisplayState;
 };
 
-const gameState: GameState = {
-    players: {},
-    currentBuzzer: null,
-    isBuzzerLocked: false,
-    display: {
-        screen: "board",
-        activeQuestion: null,
-    },
-    gameData: null,
-    playedQuestions: [],
-    currentRound: 0,
-};
+// ============ Games Storage ============
+
+const games = new Map<string, GameState>();
+
+function createGame(gameId: string): GameState {
+    const game: GameState = {
+        id: gameId,
+        createdAt: new Date(),
+        players: {},
+        currentBuzzer: null,
+        isBuzzerLocked: false,
+        gameData: null,
+        playedQuestions: [],
+        currentRound: 0,
+        display: {
+            screen: "lobby",
+            activeQuestion: null,
+        },
+    };
+    games.set(gameId, game);
+    console.log(`Game created: ${gameId}`);
+    return game;
+}
+
+function getGame(gameId: string): GameState | undefined {
+    return games.get(gameId);
+}
+
+function getOrCreateGame(gameId: string): GameState {
+    return getGame(gameId) || createGame(gameId);
+}
+
+function deleteGame(gameId: string): void {
+    games.delete(gameId);
+    console.log(`Game deleted: ${gameId}`);
+}
+
+function getActiveGames(): { id: string; playerCount: number; createdAt: Date }[] {
+    return Array.from(games.values()).map(g => ({
+        id: g.id,
+        playerCount: Object.keys(g.players).length,
+        createdAt: g.createdAt,
+    }));
+}
+
+// Cleanup old games (older than 24 hours)
+setInterval(() => {
+    const now = Date.now();
+    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+    
+    games.forEach((game, gameId) => {
+        if (now - game.createdAt.getTime() > maxAge) {
+            deleteGame(gameId);
+        }
+    });
+}, 60 * 60 * 1000); // Check every hour
+
+// ============ Socket.IO ============
 
 app.prepare().then(() => {
     const httpServer = createServer(handler);
-
     const io = new Server(httpServer);
 
     io.on("connection", (socket) => {
         console.log(`Client connected: ${socket.id}`);
-        // Send initial state immediately
-        if (!gameState.currentRound) gameState.currentRound = 0; // Hot-fix for potential null
-        socket.emit("game-state", gameState);
+        let currentGameId: string | null = null;
 
-        // --- Player Events ---
+        // Join a specific game room
+        socket.on("join-room", (gameId: string) => {
+            if (currentGameId) {
+                socket.leave(currentGameId);
+            }
+            currentGameId = gameId;
+            socket.join(gameId);
+            
+            const game = getOrCreateGame(gameId);
+            socket.emit("game-state", game);
+            console.log(`Socket ${socket.id} joined game: ${gameId}`);
+        });
 
-        socket.on("join-game", (data: { name: string, playerId: string }) => {
+        // Get list of active games
+        socket.on("get-games", () => {
+            socket.emit("games-list", getActiveGames());
+        });
+
+        // Player joins the game
+        socket.on("join-game", (data: { name: string; playerId: string }) => {
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
             const { name, playerId } = data;
-
             if (!playerId) {
                 console.error("Join attempt without playerId");
                 return;
             }
 
-            console.log(`Player joining: ${name} (${playerId})`);
+            console.log(`Player joining game ${currentGameId}: ${name} (${playerId})`);
 
-            // Check if player already exists (Reconnection)
-            if (gameState.players[playerId]) {
-                console.log(`Player ${name} reconnected. Updating socketId.`);
-                gameState.players[playerId].socketId = socket.id;
-                // Update name if changed? Maybe keep original.
+            if (game.players[playerId]) {
+                console.log(`Player ${name} reconnected to game ${currentGameId}`);
+                game.players[playerId].socketId = socket.id;
             } else {
-                // New Player
-                gameState.players[playerId] = {
+                game.players[playerId] = {
                     id: playerId,
                     socketId: socket.id,
                     name,
@@ -94,133 +154,185 @@ app.prepare().then(() => {
                 };
             }
 
-            io.emit("game-state", gameState);
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Buzz
         socket.on("buzz", () => {
-            if (gameState.display.screen !== 'question') {
-                return;
-            }
-            // Find player by socketId
-            const player = Object.values(gameState.players).find(p => p.socketId === socket.id);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game || game.display.screen !== "question") return;
+
+            const player = Object.values(game.players).find(p => p.socketId === socket.id);
             if (!player) return;
 
-            if (!gameState.isBuzzerLocked && !gameState.currentBuzzer) {
-                gameState.currentBuzzer = player.id; // Store UUID
-                gameState.isBuzzerLocked = true;
+            if (!game.isBuzzerLocked && !game.currentBuzzer) {
+                game.currentBuzzer = player.id;
+                game.isBuzzerLocked = true;
 
-                io.emit("buzzer-winner", { playerId: player.id, playerName: player.name });
-                io.emit("play-sound", "buzzer");
-                io.emit("game-state", gameState);
+                io.to(currentGameId).emit("buzzer-winner", { playerId: player.id, playerName: player.name });
+                io.to(currentGameId).emit("play-sound", "buzzer");
+                io.to(currentGameId).emit("game-state", game);
             }
         });
 
-        // --- Admin Events ---
-
+        // Reset buzzer
         socket.on("reset-buzzer", () => {
-            gameState.currentBuzzer = null;
-            gameState.isBuzzerLocked = false;
-            io.emit("reset-buzzer");
-            io.emit("game-state", gameState);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            game.currentBuzzer = null;
+            game.isBuzzerLocked = false;
+            io.to(currentGameId).emit("reset-buzzer");
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Update score
         socket.on("update-score", ({ playerId, delta }: { playerId: string; delta: number }) => {
-            if (gameState.players[playerId]) {
-                gameState.players[playerId].score += delta;
-                io.emit("game-state", gameState);
-            }
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game || !game.players[playerId]) return;
+
+            game.players[playerId].score += delta;
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Update display
         socket.on("update-display", (newDisplayState: DisplayState) => {
-            gameState.display = newDisplayState;
-            io.emit("game-state", gameState);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            game.display = newDisplayState;
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Set game data
         socket.on("set-game-data", (data: any) => {
-            console.log("Setting game data with rounds:", data?.rounds?.length);
-            gameState.gameData = data;
-            gameState.playedQuestions = [];
-            gameState.currentRound = 0; // Reset round on new game data
-            io.emit("game-state", gameState);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            console.log(`Setting game data for ${currentGameId} with rounds:`, data?.rounds?.length);
+            game.gameData = data;
+            game.playedQuestions = [];
+            game.currentRound = 0;
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Mark question as played
         socket.on("mark-question-played", (questionId: string) => {
-            if (!gameState.playedQuestions.includes(questionId)) {
-                gameState.playedQuestions.push(questionId);
-                io.emit("game-state", gameState);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            if (!game.playedQuestions.includes(questionId)) {
+                game.playedQuestions.push(questionId);
+                io.to(currentGameId).emit("game-state", game);
             }
         });
 
+        // Reset game
         socket.on("reset-game", () => {
-            gameState.gameData = null;
-            gameState.playedQuestions = [];
-            gameState.currentBuzzer = null;
-            gameState.isBuzzerLocked = false;
-            gameState.display = { screen: "lobby", activeQuestion: null };
-            gameState.currentRound = 0;
-            // Optionally reset scores? Let's keep players but reset scores for a "New Match".
-            Object.keys(gameState.players).forEach(pid => {
-                gameState.players[pid].score = 0;
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            game.gameData = null;
+            game.playedQuestions = [];
+            game.currentBuzzer = null;
+            game.isBuzzerLocked = false;
+            game.display = { screen: "lobby", activeQuestion: null };
+            game.currentRound = 0;
+            
+            Object.keys(game.players).forEach(pid => {
+                game.players[pid].score = 0;
+                game.players[pid].bet = undefined;
+                game.players[pid].answer = undefined;
             });
-            io.emit("game-state", gameState);
+            
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Delete game completely
+        socket.on("delete-game", () => {
+            if (!currentGameId) return;
+            
+            io.to(currentGameId).emit("game-deleted");
+            deleteGame(currentGameId);
+        });
+
+        // Next round
         socket.on("next-round", () => {
-            console.log("Attempting next-round. Current:", gameState.currentRound, "Total:", gameState.gameData?.rounds?.length);
-            if (gameState.gameData && gameState.currentRound < gameState.gameData.rounds.length - 1) {
-                gameState.currentRound++;
-                console.log("Round advanced to:", gameState.currentRound);
-                // Reset display to board for new round
-                gameState.display = { ...gameState.display, screen: "board", activeQuestion: null };
-                io.emit("game-state", gameState);
-            } else {
-                console.log("Cannot advance round. Conditions not met.");
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game?.gameData) return;
+
+            if (game.currentRound < game.gameData.rounds.length - 1) {
+                game.currentRound++;
+                game.display = { ...game.display, screen: "board", activeQuestion: null };
+                io.to(currentGameId).emit("game-state", game);
             }
         });
 
+        // Set round
         socket.on("set-round", (roundIndex: number) => {
-            console.log(`Received set-round request: ${roundIndex}`);
-            if (!gameState.gameData) {
-                console.error("set-round failed: gameState.gameData is null");
-                return;
-            }
-            if (!gameState.gameData.rounds || !gameState.gameData.rounds[roundIndex]) {
-                console.error(`set-round failed: Round ${roundIndex} not found. Total rounds: ${gameState.gameData.rounds?.length}`);
-                return;
-            }
-            gameState.currentRound = roundIndex;
-            console.log(`Server currentRound updated to: ${gameState.currentRound}`);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game?.gameData?.rounds?.[roundIndex]) return;
 
-            gameState.display = { ...gameState.display, screen: "board", activeQuestion: null };
-            io.emit("game-state", gameState);
+            game.currentRound = roundIndex;
+            game.display = { ...game.display, screen: "board", activeQuestion: null };
+            io.to(currentGameId).emit("game-state", game);
         });
 
+        // Play sound
         socket.on("play-sound", (sound: string) => {
-            io.emit("play-sound", sound);
+            if (!currentGameId) return;
+            io.to(currentGameId).emit("play-sound", sound);
         });
 
-        socket.on("disconnect", () => {
-            console.log("Client disconnected:", socket.id);
-            // We DO NOT delete the player on disconnect to allow reconnection logic to work.
-            // If we want to show "offline" status, we could add an 'online' boolean to Player type.
-        });
-
+        // Submit bet (final round)
         socket.on("submit-bet", (bet: number) => {
-            const player = Object.values(gameState.players).find(p => p.socketId === socket.id);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            const player = Object.values(game.players).find(p => p.socketId === socket.id);
             if (player) {
-                gameState.players[player.id].bet = bet;
-                io.emit("game-state", gameState);
+                game.players[player.id].bet = bet;
+                io.to(currentGameId).emit("game-state", game);
             }
         });
 
+        // Submit answer (final round)
         socket.on("submit-answer", (answer: string) => {
-            const player = Object.values(gameState.players).find(p => p.socketId === socket.id);
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game) return;
+
+            const player = Object.values(game.players).find(p => p.socketId === socket.id);
             if (player) {
-                gameState.players[player.id].answer = answer;
-                io.emit("game-state", gameState);
+                game.players[player.id].answer = answer;
+                io.to(currentGameId).emit("game-state", game);
             }
         });
 
+        // Kick player
+        socket.on("kick-player", (playerId: string) => {
+            if (!currentGameId) return;
+            const game = getGame(currentGameId);
+            if (!game || !game.players[playerId]) return;
+
+            delete game.players[playerId];
+            io.to(currentGameId).emit("game-state", game);
+        });
+
+        // Disconnect
+        socket.on("disconnect", () => {
+            console.log(`Client disconnected: ${socket.id}`);
+        });
     });
 
     httpServer

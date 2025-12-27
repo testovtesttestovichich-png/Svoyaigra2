@@ -1,12 +1,22 @@
-
 "use client";
 
-import { io } from "socket.io-client";
+import { io, Socket } from "socket.io-client";
 
-// Initialize socket connection
-// We don't specify URL to let it auto-connect to window.location.origin
-// This works perfectly for both localhost and specific IP access
-export const socket = io({
-    autoConnect: true,
-    reconnection: true,
-});
+let socket: Socket | null = null;
+
+export function getSocket(): Socket {
+    if (!socket) {
+        socket = io({
+            autoConnect: true,
+            reconnection: true,
+        });
+    }
+    return socket;
+}
+
+export function joinGameRoom(gameId: string): void {
+    const s = getSocket();
+    s.emit("join-room", gameId);
+}
+
+export { socket };
