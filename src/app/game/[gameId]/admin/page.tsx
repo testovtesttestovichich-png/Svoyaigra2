@@ -20,6 +20,7 @@ export default function AdminPage() {
     const [jsonInput, setJsonInput] = useState("");
     const [nextRoundConfirm, setNextRoundConfirm] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [judgedPlayers, setJudgedPlayers] = useState<Record<string, 'correct' | 'wrong'>>({});
 
     const socket = getSocket();
 
@@ -410,7 +411,7 @@ export default function AdminPage() {
                                                     className="bg-purple-600 hover:bg-purple-500 py-2 rounded font-bold">Показать Вопрос</button>
                                             )}
                                             {gameState.display.screen === 'final_question' && (
-                                                <button onClick={() => socket.emit("update-display", { ...gameState.display, screen: "final_processing" })}
+                                                <button onClick={() => { socket.emit("update-display", { ...gameState.display, screen: "final_processing" }); setJudgedPlayers({}); }}
                                                     className="bg-blue-600 hover:bg-blue-500 py-2 rounded font-bold">К Ответам</button>
                                             )}
                                             {gameState.display.screen === 'final_processing' && (
@@ -421,11 +422,57 @@ export default function AdminPage() {
                                                 <button onClick={() => { socket.emit("update-display", { ...gameState.display, screen: "game_over" }); socket.emit("play-sound", "applaus"); }}
                                                     className="bg-yellow-500 hover:bg-yellow-400 text-black py-3 rounded font-black">🏆 ИТОГИ</button>
                                             )}
-                                            <div className="text-left text-xs bg-neutral-900 p-2 rounded mt-2">
+                                            
+                                            {/* Players answers with judge buttons */}
+                                            <div className="text-left text-xs bg-neutral-900 p-3 rounded mt-2 space-y-3">
+                                                <div className="text-neutral-400 font-bold border-b border-neutral-700 pb-2">Ответы игроков:</div>
                                                 {Object.values(gameState.players || {}).map((p: any) => (
-                                                    <div key={p.id} className="flex justify-between py-1 border-b border-neutral-800 last:border-0">
-                                                        <span>{p.name} (ставка: {p.bet || 0})</span>
-                                                        <span className="text-yellow-400">{p.answer || '...'}</span>
+                                                    <div key={p.id} className={`p-2 rounded border ${
+                                                        judgedPlayers[p.id] === 'correct' ? 'border-green-500 bg-green-900/30' :
+                                                        judgedPlayers[p.id] === 'wrong' ? 'border-red-500 bg-red-900/30' :
+                                                        'border-neutral-700'
+                                                    }`}>
+                                                        <div className="flex justify-between items-center mb-2">
+                                                            <span className="font-bold text-sm">{p.name}</span>
+                                                            <span className="text-yellow-400 font-mono">Ставка: {p.bet || 0}</span>
+                                                        </div>
+                                                        <div className="text-lg mb-2 text-white">
+                                                            {p.answer ? `"${p.answer}"` : <span className="text-neutral-500 italic">Нет ответа</span>}
+                                                        </div>
+                                                        {(gameState.display.screen === 'final_processing' || gameState.display.screen === 'final_reveal') && (
+                                                            <div className="flex gap-2">
+                                                                {judgedPlayers[p.id] ? (
+                                                                    <div className={`flex-1 text-center py-2 rounded font-bold ${
+                                                                        judgedPlayers[p.id] === 'correct' ? 'bg-green-600' : 'bg-red-600'
+                                                                    }`}>
+                                                                        {judgedPlayers[p.id] === 'correct' ? `✅ +${p.bet || 0}` : `❌ -${p.bet || 0}`}
+                                                                    </div>
+                                                                ) : (
+                                                                    <>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                adjustScore(p.id, p.bet || 0);
+                                                                                socket.emit("play-sound", "correct");
+                                                                                setJudgedPlayers(prev => ({ ...prev, [p.id]: 'correct' }));
+                                                                            }}
+                                                                            className="flex-1 bg-green-600 hover:bg-green-500 py-2 rounded font-bold text-sm"
+                                                                        >
+                                                                            ✅ Верно (+{p.bet || 0})
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                adjustScore(p.id, -(p.bet || 0));
+                                                                                socket.emit("play-sound", "wrong");
+                                                                                setJudgedPlayers(prev => ({ ...prev, [p.id]: 'wrong' }));
+                                                                            }}
+                                                                            className="flex-1 bg-red-600 hover:bg-red-500 py-2 rounded font-bold text-sm"
+                                                                        >
+                                                                            ❌ Неверно (-{p.bet || 0})
+                                                                        </button>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>

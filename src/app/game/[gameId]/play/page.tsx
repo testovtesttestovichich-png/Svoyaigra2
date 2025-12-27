@@ -20,6 +20,12 @@ export default function PlayPage() {
     const [gameState, setGameState] = useState<any>(null);
     const [playerId, setPlayerId] = useState<string>("");
     const [gameDeleted, setGameDeleted] = useState(false);
+    
+    // Final round state
+    const [betValue, setBetValue] = useState("");
+    const [betSubmitted, setBetSubmitted] = useState(false);
+    const [answerValue, setAnswerValue] = useState("");
+    const [answerSubmitted, setAnswerSubmitted] = useState(false);
 
     const socket = getSocket();
 
@@ -127,6 +133,21 @@ export default function PlayPage() {
         }
     };
 
+    const handleSubmitBet = () => {
+        const val = parseInt(betValue);
+        if (val > 0 && val <= Math.max(score, 1)) {
+            socket.emit("submit-bet", val);
+            setBetSubmitted(true);
+        }
+    };
+
+    const handleSubmitAnswer = () => {
+        if (answerValue.trim()) {
+            socket.emit("submit-answer", answerValue.trim());
+            setAnswerSubmitted(true);
+        }
+    };
+
     if (gameDeleted) {
         return (
             <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6">
@@ -213,42 +234,58 @@ export default function PlayPage() {
                 {gameState?.display?.screen === 'final_bets' ? (
                     <div className="w-full max-w-sm flex flex-col gap-4">
                         <h2 className="text-2xl font-bold text-center mb-4 text-yellow-500">Ваша Ставка</h2>
-                        <input
-                            type="number"
-                            min="1"
-                            max={Math.max(score, 1)}
-                            className="bg-neutral-800 border-2 border-yellow-600 rounded-xl p-4 text-center text-4xl font-bold w-full outline-none"
-                            placeholder="0"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const val = parseInt(e.currentTarget.value);
-                                    if (val > 0 && val <= Math.max(score, 1)) {
-                                        socket.emit("submit-bet", val);
-                                        e.currentTarget.disabled = true;
-                                    }
-                                }
-                            }}
-                        />
-                        <p className="text-center text-neutral-400 text-sm">Введите и нажмите Enter</p>
+                        {betSubmitted ? (
+                            <div className="text-center">
+                                <div className="text-6xl mb-4">✅</div>
+                                <div className="text-2xl font-bold text-green-400">Ставка принята: {betValue}</div>
+                            </div>
+                        ) : (
+                            <>
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max={Math.max(score, 1)}
+                                    value={betValue}
+                                    onChange={(e) => setBetValue(e.target.value)}
+                                    className="bg-neutral-800 border-2 border-yellow-600 rounded-xl p-4 text-center text-4xl font-bold w-full outline-none focus:border-yellow-400"
+                                    placeholder="0"
+                                />
+                                <button
+                                    onClick={handleSubmitBet}
+                                    disabled={!betValue || parseInt(betValue) <= 0 || parseInt(betValue) > Math.max(score, 1)}
+                                    className="w-full py-4 bg-yellow-600 hover:bg-yellow-500 rounded-xl font-bold text-xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                                >
+                                    Сделать ставку
+                                </button>
+                            </>
+                        )}
                     </div>
                 ) : gameState?.display?.screen === 'final_question' ? (
                     <div className="w-full max-w-sm flex flex-col gap-4">
                         <h2 className="text-2xl font-bold text-center mb-4 text-blue-400">Ваш Ответ</h2>
-                        <textarea
-                            className="bg-neutral-800 border-2 border-blue-600 rounded-xl p-4 text-xl w-full h-32 outline-none"
-                            placeholder="Напишите ответ..."
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    const val = e.currentTarget.value;
-                                    if (val.trim()) {
-                                        socket.emit("submit-answer", val);
-                                        e.currentTarget.disabled = true;
-                                    }
-                                }
-                            }}
-                        />
-                        <p className="text-center text-neutral-400 text-sm">Enter для отправки</p>
+                        {answerSubmitted ? (
+                            <div className="text-center">
+                                <div className="text-6xl mb-4">✅</div>
+                                <div className="text-2xl font-bold text-green-400">Ответ отправлен</div>
+                                <div className="text-neutral-400 mt-2">"{answerValue}"</div>
+                            </div>
+                        ) : (
+                            <>
+                                <textarea
+                                    value={answerValue}
+                                    onChange={(e) => setAnswerValue(e.target.value)}
+                                    className="bg-neutral-800 border-2 border-blue-600 rounded-xl p-4 text-xl w-full h-32 outline-none focus:border-blue-400 resize-none"
+                                    placeholder="Напишите ответ..."
+                                />
+                                <button
+                                    onClick={handleSubmitAnswer}
+                                    disabled={!answerValue.trim()}
+                                    className="w-full py-4 bg-blue-600 hover:bg-blue-500 rounded-xl font-bold text-xl disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all"
+                                >
+                                    Отправить ответ
+                                </button>
+                            </>
+                        )}
                     </div>
                 ) : (
                     <button
