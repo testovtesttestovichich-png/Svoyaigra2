@@ -84,9 +84,9 @@ export default function DisplayPage() {
         if (isDomain) {
             return `https://${publicHost}/play`;
         }
-        // It's an IP address - use current port
-        const port = typeof window !== 'undefined' ? window.location.port : '8080';
-        return `http://${publicHost}:${port}/play`;
+        // It's an IP address - use current port if present
+        const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '';
+        return `http://${publicHost}${port}/play`;
     };
     const playerUrl = getPlayerUrl();
 

@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,33 +5,45 @@ import Link from "next/link";
 import { QRCodeSVG } from "qrcode.react";
 
 export default function Home() {
-  const [ipAddress, setIpAddress] = useState<string>("");
+  const [localIp, setLocalIp] = useState<string>("");
   const [mounted, setMounted] = useState(false);
+
+  // Use env variable if set, otherwise fetch local IP
+  const publicHost = process.env.NEXT_PUBLIC_HOST || localIp;
 
   useEffect(() => {
     setMounted(true);
 
-    // Fetch local IP from server
-    fetch('/api/ip')
-      .then(res => res.json())
-      .then(data => {
-        if (data.ip) {
-          setIpAddress(data.ip);
-        }
-      })
-      .catch(err => console.error("Failed to fetch IP:", err));
+    // Fetch local IP only if PUBLIC_HOST not set
+    if (!process.env.NEXT_PUBLIC_HOST) {
+      fetch('/api/ip')
+        .then(res => res.json())
+        .then(data => {
+          if (data.ip) {
+            setLocalIp(data.ip);
+          }
+        })
+        .catch(err => console.error("Failed to fetch IP:", err));
+    }
   }, []);
 
   if (!mounted) return null;
 
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-
-  // Construct the network URL for players
-  // If we have a fetched IP, prefer that over localhost
-  const port = typeof window !== 'undefined' ? window.location.port : '3000';
-  const playerUrl = ipAddress && ipAddress !== 'localhost' && ipAddress !== '127.0.0.1'
-    ? `http://${ipAddress}:${port}/play`
-    : `${origin}/play`;
+  // Determine player URL for QR code
+  const getPlayerUrl = () => {
+    if (!publicHost) {
+      return typeof window !== 'undefined' ? `${window.location.origin}/play` : '/play';
+    }
+    // Check if it's a domain (contains dot but not just IP)
+    const isDomain = publicHost.includes('.') && !/^\d+\.\d+\.\d+\.\d+$/.test(publicHost);
+    if (isDomain) {
+      return `https://${publicHost}/play`;
+    }
+    // It's an IP address - use current port
+    const port = typeof window !== 'undefined' && window.location.port ? `:${window.location.port}` : '';
+    return `http://${publicHost}${port}/play`;
+  };
+  const playerUrl = getPlayerUrl();
 
   return (
     <div className="min-h-screen bg-neutral-900 text-white flex flex-col items-center justify-center p-8 font-sans">
