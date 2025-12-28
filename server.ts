@@ -33,7 +33,7 @@ type DisplayState = {
 
 type GameState = {
     id: string;
-    createdAt: Date;
+    createdAt: number; // timestamp for reliable comparison
     players: Record<string, Player>;
     currentBuzzer: string | null;
     isBuzzerLocked: boolean;
@@ -50,7 +50,7 @@ const games = new Map<string, GameState>();
 function createGame(gameId: string): GameState {
     const game: GameState = {
         id: gameId,
-        createdAt: new Date(),
+        createdAt: Date.now(),
         players: {},
         currentBuzzer: null,
         isBuzzerLocked: false,
@@ -63,7 +63,7 @@ function createGame(gameId: string): GameState {
         },
     };
     games.set(gameId, game);
-    console.log(`Game created: ${gameId}`);
+    console.log(`[GAMES] Created: ${gameId}. Total active: ${games.size}`);
     return game;
 }
 
@@ -71,16 +71,14 @@ function getGame(gameId: string): GameState | undefined {
     return games.get(gameId);
 }
 
-function getOrCreateGame(gameId: string): GameState {
-    return getGame(gameId) || createGame(gameId);
-}
-
-function deleteGame(gameId: string): void {
+function deleteGame(gameId: string): boolean {
+    const existed = games.has(gameId);
     games.delete(gameId);
-    console.log(`Game deleted: ${gameId}`);
+    console.log(`[GAMES] Deleted: ${gameId}. Existed: ${existed}. Total active: ${games.size}`);
+    return existed;
 }
 
-function getActiveGames(): { id: string; playerCount: number; createdAt: Date }[] {
+function getActiveGames(): { id: string; playerCount: number; createdAt: number }[] {
     return Array.from(games.values()).map(g => ({
         id: g.id,
         playerCount: Object.keys(g.players).length,
@@ -89,16 +87,31 @@ function getActiveGames(): { id: string; playerCount: number; createdAt: Date }[
 }
 
 // Cleanup old games (older than 24 hours)
-setInterval(() => {
+const GAME_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
+const CLEANUP_INTERVAL = 60 * 60 * 1000; // Check every hour
+
+function cleanupOldGames() {
     const now = Date.now();
-    const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+    let deleted = 0;
     
     games.forEach((game, gameId) => {
-        if (now - game.createdAt.getTime() > maxAge) {
+        const age = now - game.createdAt;
+        if (age > GAME_MAX_AGE) {
+            console.log(`[CLEANUP] Game ${gameId} is ${Math.round(age / 1000 / 60 / 60)}h old, deleting...`);
             deleteGame(gameId);
+            deleted++;
         }
     });
-}, 60 * 60 * 1000); // Check every hour
+    
+    if (deleted > 0) {
+        console.log(`[CLEANUP] Removed ${deleted} old games. Remaining: ${games.size}`);
+    }
+}
+
+setInterval(cleanupOldGames, CLEANUP_INTERVAL);
+
+// Also run cleanup on startup after 1 minute
+setTimeout(cleanupOldGames, 60 * 1000);
 
 // ============ Socket.IO ============
 
@@ -107,7 +120,7 @@ app.prepare().then(() => {
     const io = new Server(httpServer);
 
     io.on("connection", (socket) => {
-        console.log(`Client connected: ${socket.id}`);
+        console.log(`[SOCKET] Connected: ${socket.id}`);
         let currentGameId: string | null = null;
 
         // Join a specific game room
@@ -118,9 +131,15 @@ app.prepare().then(() => {
             currentGameId = gameId;
             socket.join(gameId);
             
-            const game = getOrCreateGame(gameId);
+            // Only get existing game, don't auto-create
+            let game = getGame(gameId);
+            if (!game) {
+                // Create only if joining for first time
+                game = createGame(gameId);
+            }
+            
             socket.emit("game-state", game);
-            console.log(`Socket ${socket.id} joined game: ${gameId}`);
+            console.log(`[SOCKET] ${socket.id} joined game: ${gameId}`);
         });
 
         // Get list of active games
@@ -132,18 +151,21 @@ app.prepare().then(() => {
         socket.on("join-game", (data: { name: string; playerId: string }) => {
             if (!currentGameId) return;
             const game = getGame(currentGameId);
-            if (!game) return;
-
-            const { name, playerId } = data;
-            if (!playerId) {
-                console.error("Join attempt without playerId");
+            if (!game) {
+                socket.emit("game-deleted");
                 return;
             }
 
-            console.log(`Player joining game ${currentGameId}: ${name} (${playerId})`);
+            const { name, playerId } = data;
+            if (!playerId) {
+                console.error("[SOCKET] Join attempt without playerId");
+                return;
+            }
+
+            console.log(`[PLAYER] Joining game ${currentGameId}: ${name} (${playerId})`);
 
             if (game.players[playerId]) {
-                console.log(`Player ${name} reconnected to game ${currentGameId}`);
+                console.log(`[PLAYER] ${name} reconnected to game ${currentGameId}`);
                 game.players[playerId].socketId = socket.id;
             } else {
                 game.players[playerId] = {
@@ -214,7 +236,7 @@ app.prepare().then(() => {
             const game = getGame(currentGameId);
             if (!game) return;
 
-            console.log(`Setting game data for ${currentGameId} with rounds:`, data?.rounds?.length);
+            console.log(`[GAME] Setting game data for ${currentGameId} with rounds:`, data?.rounds?.length);
             game.gameData = data;
             game.playedQuestions = [];
             game.currentRound = 0;
@@ -259,8 +281,27 @@ app.prepare().then(() => {
         socket.on("delete-game", () => {
             if (!currentGameId) return;
             
+            console.log(`[GAME] Delete requested for: ${currentGameId}`);
+            
+            // Notify all clients in the room
             io.to(currentGameId).emit("game-deleted");
+            
+            // Get all sockets in the room and make them leave
+            const room = io.sockets.adapter.rooms.get(currentGameId);
+            if (room) {
+                room.forEach(socketId => {
+                    const s = io.sockets.sockets.get(socketId);
+                    if (s) {
+                        s.leave(currentGameId!);
+                    }
+                });
+            }
+            
+            // Delete the game
             deleteGame(currentGameId);
+            
+            // Clear current game for this socket
+            currentGameId = null;
         });
 
         // Next round
@@ -331,7 +372,7 @@ app.prepare().then(() => {
 
         // Disconnect
         socket.on("disconnect", () => {
-            console.log(`Client disconnected: ${socket.id}`);
+            console.log(`[SOCKET] Disconnected: ${socket.id}`);
         });
     });
 
@@ -344,5 +385,6 @@ app.prepare().then(() => {
             const localIp = ip.address();
             console.log(`> Ready on http://${hostname}:${port}`);
             console.log(`> Network access: http://${localIp}:${port}`);
+            console.log(`> Active games: ${games.size}`);
         });
 });
